@@ -87,43 +87,46 @@ jobs:
 
       # POST-DEPLOYMENT VERIFICATION
 
-      - name: Verify Preview deployment
-        if: github.ref == 'refs/heads/develop'
-        env:
-          DEPLOYMENT_URL: ${{ steps.preview.outputs.url }}
-        run: |
-          echo "Checking: $DEPLOYMENT_URL/api/health"
+      
+- name: Verify Preview deployment
+  if: github.ref == 'refs/heads/develop'
+  env:
+    DEPLOYMENT_URL: ${{ steps.preview.outputs.url }}
+    VERCEL_BYPASS_SECRET: ${{ secrets.VERCEL_AUTOMATION_BYPASS_SECRET }}
+  run: |
+    echo "Checking: $DEPLOYMENT_URL/api/health"
 
-          HTTP_STATUS=$(curl --location \
-            --silent --show-error \
-            --retry 10 --retry-delay 5 --retry-connrefused \
-            --output health-response.txt \
-            --write-out "%{http_code}" \
-            "$DEPLOYMENT_URL/api/health")
+    HTTP_STATUS=$(curl --location \
+      --silent --show-error \
+      --output health-response.txt \
+      --write-out "%{http_code}" \
+      --retry 10 --retry-delay 5 --retry-connrefused \
+      --header "x-vercel-protection-bypass: $VERCEL_BYPASS_SECRET" \
+      "$DEPLOYMENT_URL/api/health")
 
-          echo "HTTP Status: $HTTP_STATUS"
-          echo "Response body:"
-          cat health-response.txt
+    echo "HTTP Status: $HTTP_STATUS"
+    echo "Response body:"
+    cat health-response.txt
 
-          if [ "$HTTP_STATUS" -lt 200 ] || [ "$HTTP_STATUS" -ge 300 ]; then
-            echo "Health check failed: HTTP $HTTP_STATUS"
-            exit 1
-          fi
+    if [ "$HTTP_STATUS" -lt 200 ] || [ "$HTTP_STATUS" -ge 300 ]; then
+      echo "Health check failed: HTTP $HTTP_STATUS"
+      exit 1
+    fi
 
-          node -e '
-            const fs = require("fs");
-            const body = fs.readFileSync("health-response.txt", "utf8");
+    node -e '
+      const fs = require("fs");
+      const body = fs.readFileSync("health-response.txt", "utf8");
 
-            try {
-              const data = JSON.parse(body);
+      try {
+        const data = JSON.parse(body);
 
-              if (data.status !== "ok") {
-                throw new Error("Unexpected health status");
-              }
+        if (data.status !== "ok") {
+          throw new Error("Unexpected health status");
+        }
 
-              console.log("Health check passed:", data);
-            } catch (error) {
-              console.error("Invalid health response:", error.message);
-              process.exit(1);
-            }
-          '
+        console.log("Health check passed:", data);
+      } catch (error) {
+        console.error("Invalid health response:", error.message);
+        process.exit(1);
+      }
+    '
