@@ -3,11 +3,15 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev",
-    "build": "next build",
-    "start": "next start",
-    "lint": "eslint"
-  },
+  "dev": "next dev",
+  "build": "next build",
+  "start": "next start",
+  "lint": "eslint",
+  "typecheck": "tsc --noEmit",
+  "prepare:release": "bash scripts/prepare-release.sh",
+  "test:release": "bash scripts/test-release.sh",
+  "deploy:release": "bash scripts/deploy.sh"
+},
   "dependencies": {
     "next": "16.4.6",
     "react": "19.3.0",

@@ -1,0 +1,79 @@
+name: CD - Vercel Deployment
+
+on:
+  push:
+    branches:
+      - develop
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cd-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Validate and deploy
+    runs-on: ubuntu-latest
+
+    env:
+      VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+      VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+      VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Configure Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run ESLint
+        run: npm run lint
+
+      - name: Check TypeScript
+        run: npm run typecheck
+
+      - name: Install Vercel CLI
+        run: npm install --global vercel@latest
+
+      # PREPARE RELEASE
+      - name: Prepare Preview environment
+        if: github.ref == 'refs/heads/develop'
+        run: bash scripts/prepare-release.sh preview
+
+      - name: Prepare Production environment
+        if: github.ref == 'refs/heads/main'
+        run: bash scripts/prepare-release.sh production
+
+      # DEPLOY
+      - name: Deploy to Vercel
+        id: deployment
+        run: |
+          if [ "${GITHUB_REF}" = "refs/heads/main" ]; then
+            bash scripts/deploy.sh production
+          else
+            bash scripts/deploy.sh preview
+          fi
+
+      # VERIFY RELEASE
+      - name: Verify deployment
+        env:
+          DEPLOYMENT_URL: ${{ steps.deployment.outputs.url }}
+          VERCEL_AUTOMATION_BYPASS_SECRET: ${{ secrets.VERCEL_AUTOMATION_BYPASS_SECRET }}
+        run: |
+          if [ -z "$VERCEL_AUTOMATION_BYPASS_SECRET" ]; then
+            echo "ERROR: Falta VERCEL_AUTOMATION_BYPASS_SECRET."
+            exit 1
+          fi
+
+          bash scripts/test-release.sh "$DEPLOYMENT_URL"
