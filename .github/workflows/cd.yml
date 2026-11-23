@@ -1,0 +1,109 @@
+name: CD - Vercel Deployment
+
+on:
+  push:
+    branches:
+      - develop
+      - main
+
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cd-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Validate and deploy
+    runs-on: ubuntu-latest
+
+    env:
+      VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+      VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+      VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Configure Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run ESLint
+        run: npm run lint
+
+      - name: Check TypeScript
+        run: npm run typecheck
+
+      - name: Install Vercel CLI
+        run: npm install --global vercel@latest
+
+      # PREVIEW: develop
+      - name: Pull Preview environment
+        if: github.ref == 'refs/heads/develop'
+        run: vercel pull --yes --environment=preview --token="$VERCEL_TOKEN"
+
+      - name: Build Preview
+        if: github.ref == 'refs/heads/develop'
+        run: vercel build --token="$VERCEL_TOKEN"
+
+      - name: Deploy Preview
+        id: preview
+        if: github.ref == 'refs/heads/develop'
+        run: |
+          vercel deploy --prebuilt --token="$VERCEL_TOKEN" > deployment-url.txt
+          URL="$(cat deployment-url.txt)"
+          echo "url=$URL" >> "$GITHUB_OUTPUT"
+          echo "### Preview deployment" >> "$GITHUB_STEP_SUMMARY"
+          echo "$URL" >> "$GITHUB_STEP_SUMMARY"
+
+      # PRODUCTION: main
+      - name: Pull Production environment
+        if: github.ref == 'refs/heads/main'
+        run: vercel pull --yes --environment=production --token="$VERCEL_TOKEN"
+
+      - name: Build Production
+        if: github.ref == 'refs/heads/main'
+        run: vercel build --prod --token="$VERCEL_TOKEN"
+
+      - name: Deploy Production
+        id: production
+        if: github.ref == 'refs/heads/main'
+        run: |
+          vercel deploy --prebuilt --prod --token="$VERCEL_TOKEN" > deployment-url.txt
+          URL="$(cat deployment-url.txt)"
+          echo "url=$URL" >> "$GITHUB_OUTPUT"
+          echo "### Production deployment" >> "$GITHUB_STEP_SUMMARY"
+          echo "$URL" >> "$GITHUB_STEP_SUMMARY"
+
+      # POST-DEPLOYMENT VERIFICATION
+      - name: Verify Preview deployment
+        if: github.ref == 'refs/heads/develop'
+        env:
+          DEPLOYMENT_URL: ${{ steps.preview.outputs.url }}
+        run: |
+          RESPONSE=$(curl --fail --silent --show-error \
+            --retry 10 --retry-delay 5 --retry-connrefused \
+            "$DEPLOYMENT_URL/api/health")
+
+          echo "$RESPONSE" | jq -e '.status == "ok"'
+
+      - name: Verify Production deployment
+        if: github.ref == 'refs/heads/main'
+        env:
+          DEPLOYMENT_URL: ${{ steps.production.outputs.url }}
+        run: |
+          RESPONSE=$(curl --fail --silent --show-error \
+            --retry 10 --retry-delay 5 --retry-connrefused \
+            "$DEPLOYMENT_URL/api/health")
+
+          echo "$RESPONSE" | jq -e '.status == "ok"'
